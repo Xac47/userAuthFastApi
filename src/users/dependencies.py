@@ -15,6 +15,7 @@ from src.users.utils import (
 
 
 async def validate_type_token(payload_token_type: str, token_type: str):
+    """Validate that the payload token type matches the expected token type."""
     if payload_token_type != token_type:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -23,6 +24,7 @@ async def validate_type_token(payload_token_type: str, token_type: str):
 
 
 def credentials_exception():
+    """Raise HTTP 401 exception for invalid credentials."""
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -31,6 +33,7 @@ def credentials_exception():
 
 
 async def get_user_by_token_sub(payload: dict, db: AsyncSession):
+    """Get user from token payload subject (email)."""
 
     try:
         token_data = TokenData(**payload)
@@ -47,6 +50,7 @@ async def get_user_by_token_sub(payload: dict, db: AsyncSession):
 async def get_current_user(
     token: Annotated[str, Depends(oauth2_scheme)], db: AsyncSession = Depends(get_db)
 ) -> UserRead:
+    """Get current user from access token."""
 
     payload = decode_jwt(token)
     payload_token_type = payload.get(TOKEN_TYPE_FIELD)
@@ -61,6 +65,7 @@ async def get_current_user(
 async def get_current_user_for_refresh(
     token: Annotated[str, Depends(oauth2_scheme)], db: AsyncSession = Depends(get_db)
 ) -> UserRead:
+    """Get current user from refresh token."""
 
     payload = decode_jwt(token)
     payload_token_type = payload.get(TOKEN_TYPE_FIELD)
@@ -73,6 +78,7 @@ async def get_current_user_for_refresh(
 
 
 def ensure_active(user: UserRead):
+    """Ensure user account is active."""
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Inactive user"
@@ -82,11 +88,13 @@ def ensure_active(user: UserRead):
 async def get_current_active_user(
     current_user: Annotated[UserRead, Depends(get_current_user)],
 ):
+    """Get current active user (must be authenticated and active)."""
     ensure_active(current_user)
     return current_user
 
 
 def ensure_verified(user: UserRead):
+    """Ensure user email is verified."""
     if not user.is_verified:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -98,5 +106,6 @@ def ensure_verified(user: UserRead):
 async def get_current_verified_user(
     current_user: Annotated[UserRead, Depends(get_current_active_user)],
 ):
+    """Get current verified user (must be authenticated, active, and verified)."""
     ensure_verified(current_user)
     return current_user
