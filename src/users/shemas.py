@@ -28,7 +28,7 @@ class UserRead(BaseModel):
     email: EmailStr | None = None
     is_active: bool = True
     is_verified: bool = True
-    full_name: FULL_NAME | None = None
+    full_name: str | None = None
     avatar_url: str | None = None
     last_login_at: datetime | None = None
     created_at: datetime | None = None
