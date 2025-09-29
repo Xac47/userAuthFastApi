@@ -1,17 +1,24 @@
 from typing import Annotated
-from fastapi import Depends, HTTPException, status
-from pydantic import ValidationError
+from fastapi import Depends, HTTPException, status, Request, Response
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.database import get_db
 from src.users.auth import get_user, oauth2_scheme
-from src.users.shemas import TokenData, UserRead
+from src.users.shemas import UserRead
 from src.users.utils import (
     decode_jwt,
     TOKEN_TYPE_FIELD,
     ACCESS_TOKEN_TYPE,
     REFRESH_TOKEN_TYPE,
+    ACCESS_TOKEN_COOKIE_NAME,
+    REFRESH_TOKEN_COOKIE_NAME,
+    create_access_token,
+    COOKIE_SAMESITE,
+    COOKIE_SECURE,
+    COOKIE_PATH,
 )
+from src.core.config import settings
 
 
 async def validate_type_token(payload_token_type: str, token_type: str):
@@ -35,12 +42,12 @@ def credentials_exception():
 async def get_user_by_token_sub(payload: dict, db: AsyncSession):
     """Get user from token payload subject (email)."""
 
-    try:
-        token_data = TokenData(**payload)
-    except ValidationError:
+    # Avoid strict Pydantic validation issues for 'exp'/'iat' types
+    email = payload.get("email") or payload.get("sub")
+    if not email:
         credentials_exception()
 
-    user = await get_user(token_data.email, db)
+    user = await get_user(email, db)
     if user is None:
         credentials_exception()
 
@@ -48,26 +55,86 @@ async def get_user_by_token_sub(payload: dict, db: AsyncSession):
 
 
 async def get_current_user(
-    token: Annotated[str, Depends(oauth2_scheme)], db: AsyncSession = Depends(get_db)
+    request: Request,
+    response: Response,
+    token: Annotated[str | None, Depends(oauth2_scheme)],
+    db: AsyncSession = Depends(get_db),
 ) -> UserRead:
     """Get current user from access token."""
 
-    payload = decode_jwt(token)
-    payload_token_type = payload.get(TOKEN_TYPE_FIELD)
+    # Try header first; if missing, fall back to cookie
+    raw_token = token or request.cookies.get(ACCESS_TOKEN_COOKIE_NAME)
+    if not raw_token:
+        # No access token present → try refresh flow
+        refresh_token = request.cookies.get(REFRESH_TOKEN_COOKIE_NAME)
+        if not refresh_token:
+            credentials_exception()
+        refresh_payload = decode_jwt(refresh_token)
+        await validate_type_token(
+            refresh_payload.get(TOKEN_TYPE_FIELD), token_type=REFRESH_TOKEN_TYPE
+        )
+        user = await get_user_by_token_sub(refresh_payload, db)
+        new_access = create_access_token(user)
+        response.set_cookie(
+            key=ACCESS_TOKEN_COOKIE_NAME,
+            value=new_access,
+            httponly=True,
+            samesite=COOKIE_SAMESITE,
+            secure=COOKIE_SECURE,
+            path=COOKIE_PATH,
+            max_age=settings.auth_jwt.access_token_expire_minutes * 60,
+        )
+        return user
 
-    await validate_type_token(payload_token_type, token_type=ACCESS_TOKEN_TYPE)
-
-    user = await get_user_by_token_sub(payload, db)
-
-    return user
+    try:
+        payload = decode_jwt(raw_token)
+        payload_token_type = payload.get(TOKEN_TYPE_FIELD)
+        await validate_type_token(payload_token_type, token_type=ACCESS_TOKEN_TYPE)
+        user = await get_user_by_token_sub(payload, db)
+        return user
+    except HTTPException as exc:
+        # If access token expired, try to refresh using refresh token cookie
+        if (
+            exc.status_code == status.HTTP_401_UNAUTHORIZED
+            and exc.detail == "Token has expired"
+        ):
+            refresh_token = request.cookies.get(REFRESH_TOKEN_COOKIE_NAME)
+            if not refresh_token:
+                raise
+            refresh_payload = decode_jwt(refresh_token)
+            await validate_type_token(
+                refresh_payload.get(TOKEN_TYPE_FIELD), token_type=REFRESH_TOKEN_TYPE
+            )
+            # We trust refresh token subject to issue new access token
+            user = await get_user_by_token_sub(refresh_payload, db)
+            new_access = create_access_token(user)
+            response.set_cookie(
+                key=ACCESS_TOKEN_COOKIE_NAME,
+                value=new_access,
+                httponly=True,
+                samesite=COOKIE_SAMESITE,
+                secure=COOKIE_SECURE,
+                path=COOKIE_PATH,
+                max_age=settings.auth_jwt.access_token_expire_minutes * 60,
+            )
+            return user
+        raise
 
 
 async def get_current_user_for_refresh(
-    token: Annotated[str, Depends(oauth2_scheme)], db: AsyncSession = Depends(get_db)
+    request: Request,
+    token: Annotated[str | None, Depends(oauth2_scheme)],
+    db: AsyncSession = Depends(get_db),
 ) -> UserRead:
     """Get current user from refresh token."""
 
-    payload = decode_jwt(token)
+    raw_token = token
+    if not raw_token:
+        raw_token = request.cookies.get(REFRESH_TOKEN_COOKIE_NAME)
+    if not raw_token:
+        credentials_exception()
+
+    payload = decode_jwt(raw_token)
     payload_token_type = payload.get(TOKEN_TYPE_FIELD)
 
     await validate_type_token(payload_token_type, token_type=REFRESH_TOKEN_TYPE)
