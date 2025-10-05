@@ -44,6 +44,7 @@ class UserCreate(BaseModel):
 
     @field_validator("password_2")
     def password_match(cls, v, values):
+        """Validate that `password_2` matches `password`."""
         if "password" in values.data and v != values.data["password"]:
             raise ValueError("Passwords do not match")
         return v

@@ -4,7 +4,7 @@ from fastapi import HTTPException, status
 import jwt
 
 from src.core.config import settings
-from src.users.shemas import UserShema
+from src.users.schemas import UserShema
 
 
 TOKEN_TYPE_FIELD = "type"

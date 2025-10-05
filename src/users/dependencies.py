@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db.database import get_db
 from src.users.auth import get_user, oauth2_scheme
-from src.users.shemas import UserRead
+from src.users.schemas import UserRead
 from src.users.utils import (
     decode_jwt,
     TOKEN_TYPE_FIELD,

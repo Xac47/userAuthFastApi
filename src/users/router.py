@@ -19,7 +19,7 @@ from src.users.dependencies import (
     get_current_user,
 )
 from src.users.models import User
-from src.users.shemas import FormDataAuth, TokenInfo, UserCreate, UserRead
+from src.users.schemas import FormDataAuth, TokenInfo, UserCreate, UserRead
 from src.users.utils import (
     create_access_token,
     create_refresh_token,
